@@ -7,9 +7,90 @@
  <title>Chunked upload demo</title>
 </head>
 <body>
- <form id="form" enctype="multipart/form-data" action="http://localhost:4500/upload" method="POST">
-  <input class="input file-input" type="file" name="file" multiple />
-  <button class="button" type="submit">Submit</button>
- </form>
+<form id="form" enctype="multipart/form-data">
+ <input class="input file-input" type="file" name="upload" multiple />
+ <button class="button" type="submit">Submit</button>
+</form>
+
+<script>
+ const form = document.getElementById("form");
+ form.onsubmit = handleUpload;
+
+ function handleUpload(event) {
+  event.preventDefault();
+
+  const file = event.target.elements.upload.files[0];
+  const maxChunkSize = 1024 * 1024 * 4; // 4MiB
+  const numberOfChunks = Math.ceil(file.size/maxChunkSize);
+
+  let position = 0;
+  let endPosition = maxChunkSize;
+  let chunkCount = 0;
+
+  console.log("file: ", file);
+  console.log("total chunks: ", numberOfChunks);
+
+  while(position < file.size) {
+   const result = createChunk(file, position, endPosition);
+   chunkCount++;
+
+   console.log("chunk#" + chunkCount);
+   console.log("chunk#"+ chunkCount + " size: ", result.size);
+
+   send(result.chunk, numberOfChunks, maxChunkSize, file.size, position)
+   .then(function(res) {
+     console.log("success:", res);
+   }).catch(function (err) {
+     console.error("error:", err.statusText);
+   });
+   position = endPosition;
+   endPosition = position + maxChunkSize;
+  }
+ }
+
+ function createChunk(file, position, endPosition) {
+  const chunk = file.slice(position, endPosition);
+  const chunkForm = new FormData();
+
+  chunkForm.append('file', chunk, file.name);
+
+  console.log("chunk file: ", chunkForm.get("file"));
+
+  return { chunk: chunkForm, size: chunk.size };
+ }
+
+ function send(chunk, numberOfChunks, maxChunkSize, totalSize, position) {
+  return new Promise(function(res,rej) {
+   const xhr = new XMLHttpRequest();
+   // In a real implementation the requests will be asynchronous
+   xhr.open("PUT", "http://localhost:4500/upload", false);
+   xhr.onload = success;
+   xhr.onerror = error;
+   xhr.setRequestHeader("Upload-Offset", position.toString());
+   xhr.setRequestHeader("Upload-Length", totalSize.toString());
+   xhr.setRequestHeader("Upload-Chunks", numberOfChunks);
+   xhr.setRequestHeader("Upload-Max-Chunk-Size", maxChunkSize);
+
+   xhr.send(chunk);
+
+   function error() {
+    rej({
+     status: xhr.status,
+     statusText: xhr.statusText
+    });
+   }
+   function success() {
+    if (xhr.status >= 200) {
+     res(xhr.response);
+    } else {
+     rej({
+      status: xhr.status,
+      statusText: xhr.statusText
+     });
+    }
+   }
+  })
+ }
+</script>
 </body>
 </html>
