@@ -4,6 +4,7 @@
  <meta charset="UTF-8" />
  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
  <meta http-equiv="X-UA-Compatible" content="ie=edge" />
+ <script src="https://cdn.jsdelivr.net/npm/tus-js-client@latest/dist/tus.min.js"></script>
  <title>Chunked upload demo</title>
 </head>
 <body>
@@ -19,77 +20,46 @@
  function handleUpload(event) {
   event.preventDefault();
 
-  const file = event.target.elements.upload.files[0];
-  const maxChunkSize = 1024 * 1024 * 4; // 4MiB
-  const numberOfChunks = Math.ceil(file.size/maxChunkSize);
+   // Get the selected file from the input element
+   var file = event.target.elements.upload.files[0]
 
-  let position = 0;
-  let endPosition = maxChunkSize;
-  let chunkCount = 0;
-
-  console.log("file: ", file);
-  console.log("total chunks: ", numberOfChunks);
-
-  while(position < file.size) {
-   const result = createChunk(file, position, endPosition);
-   chunkCount++;
-
-   console.log("chunk#" + chunkCount);
-   console.log("chunk#"+ chunkCount + " size: ", result.size);
-
-   send(result.chunk, numberOfChunks, maxChunkSize, file.size, position)
-   .then(function(res) {
-     console.log("success:", res);
-   }).catch(function (err) {
-     console.error("error:", err.statusText);
-   });
-   position = endPosition;
-   endPosition = position + maxChunkSize;
-  }
- }
-
- function createChunk(file, position, endPosition) {
-  const chunk = file.slice(position, endPosition);
-  const chunkForm = new FormData();
-
-  chunkForm.append('file', chunk, file.name);
-
-  console.log("chunk file: ", chunkForm.get("file"));
-
-  return { chunk: chunkForm, size: chunk.size };
- }
-
- function send(chunk, numberOfChunks, maxChunkSize, totalSize, position) {
-  return new Promise(function(res,rej) {
-   const xhr = new XMLHttpRequest();
-   // In a real implementation the requests will be asynchronous
-   xhr.open("PUT", "http://localhost:4500/upload", false);
-   xhr.onload = success;
-   xhr.onerror = error;
-   xhr.setRequestHeader("Upload-Offset", position.toString());
-   xhr.setRequestHeader("Upload-Length", totalSize.toString());
-   xhr.setRequestHeader("Upload-Chunks", numberOfChunks);
-   xhr.setRequestHeader("Upload-Max-Chunk-Size", maxChunkSize);
-
-   xhr.send(chunk);
-
-   function error() {
-    rej({
-     status: xhr.status,
-     statusText: xhr.statusText
-    });
-   }
-   function success() {
-    if (xhr.status >= 200) {
-     res(xhr.response);
-    } else {
-     rej({
-      status: xhr.status,
-      statusText: xhr.statusText
-     });
+   // Create a new tus upload
+   var upload = new tus.Upload(file, {
+    chunkSize: 1024 * 1024, // 1MiB
+    // Endpoint is the upload creation URL from your tus server
+    endpoint: "http://localhost:1080/files/",
+    // Retry delays will enable tus-js-client to automatically retry on errors
+    retryDelays: [0, 3000, 5000, 10000, 20000],
+    // Attach additional meta data about the file for the server
+    metadata: {
+     filename: file.name,
+     filetype: file.type
+    },
+    // Callback for errors which cannot be fixed using retries
+    onError: function(error) {
+     console.log("Failed because: " + error)
+    },
+    // Callback for reporting upload progress
+    onProgress: function(bytesUploaded, bytesTotal) {
+     var percentage = (bytesUploaded / bytesTotal * 100).toFixed(2)
+     console.log(bytesUploaded, bytesTotal, percentage + "%")
+    },
+    // Callback for once the upload is completed
+    onSuccess: function() {
+     console.log("Download %s from %s", upload.file.name, upload.url)
     }
-   }
-  })
+   })
+
+   // Check if there are any previous uploads to continue.
+   upload.findPreviousUploads().then(function (previousUploads) {
+    // Found previous uploads so we select the first one.
+    if (previousUploads.length) {
+     upload.resumeFromPreviousUpload(previousUploads[0])
+    }
+
+    // Start the upload
+    upload.start()
+   })
  }
 </script>
 </body>
